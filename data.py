@@ -105,10 +105,13 @@ def get_batch(tokens, counts, ind, vocab_size, emsize=300, temporal=False, times
         return data_batch, times_batch
     return data_batch
 
+# formats the rnn inputs -- basically returns a time x vocab list
+# of how many times a token was seen per time step
 def get_rnn_input(tokens, counts, times, num_times, vocab_size, num_docs):
     indices = torch.randperm(num_docs)
     indices = torch.split(indices, 1000) 
     rnn_input = torch.zeros(num_times, vocab_size).to(device)
+    # cnt provides a count for how many documents per time step we encounter
     cnt = torch.zeros(num_times, ).to(device)
     for idx, ind in enumerate(indices):
         data_batch, times_batch = get_batch(tokens, counts, ind, vocab_size, temporal=True, times=times)

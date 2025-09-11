@@ -105,39 +105,69 @@ class DETM(nn.Module):
         return kl
 
     def get_alpha(self): ## mean field
+        # the total distributions of the alphas
         alphas = torch.zeros(self.num_times, self.num_topics, self.rho_size).to(device)
         kl_alpha = []
 
+        # sample alpha based on the mu and log that we have!
         alphas[0] = self.reparameterize(self.mu_q_alpha[:, 0, :], self.logsigma_q_alpha[:, 0, :])
 
+        # then, these next four lines describe the KL divergence between all 0's with the original distribution
+        # actually, it's the standard gaussian! because log (1) = 0 I think
         p_mu_0 = torch.zeros(self.num_topics, self.rho_size).to(device)
         logsigma_p_0 = torch.zeros(self.num_topics, self.rho_size).to(device)
         kl_0 = self.get_kl(self.mu_q_alpha[:, 0, :], self.logsigma_q_alpha[:, 0, :], p_mu_0, logsigma_p_0)
         kl_alpha.append(kl_0)
+
+        # ** So alpha is a problem that it is normally distributed **
+        # ** Might not be a problem yet, but this does restrict the embedding space **
+        # ** Potentially could be solved by trying to do transport plans between embeddings instead**
+        # ** But good news is that the restriction on the embedding space allows for better **
+        # ** Expression of time dependencies. We can verify if it's too restricted with **
+        # ** an analysis of the perplexity!**
+
+        # now we iterate over all the other time steps
         for t in range(1, self.num_times):
+            # sample the next time step
             alphas[t] = self.reparameterize(self.mu_q_alpha[:, t, :], self.logsigma_q_alpha[:, t, :]) 
             
+            # we take the previous time step as well as the parameters for the next one, with a variance described
+            # imagine that the delta being higher means that the expressivity is higher too
             p_mu_t = alphas[t-1]
             logsigma_p_t = torch.log(self.delta * torch.ones(self.num_topics, self.rho_size).to(device))
             kl_t = self.get_kl(self.mu_q_alpha[:, t, :], self.logsigma_q_alpha[:, t, :], p_mu_t, logsigma_p_t)
             kl_alpha.append(kl_t)
         kl_alpha = torch.stack(kl_alpha).sum()
+        # return the total KL divergence occuring between them
         return alphas, kl_alpha.sum()
 
     def get_eta(self, rnn_inp): ## structured amortized inference
+        # so rnn_inp is a times x vocab large matrix, and we'll be dealing with
+        # the count of a vocab for a specific time
         inp = self.q_eta_map(rnn_inp).unsqueeze(1)
         hidden = self.init_hidden()
         output, _ = self.q_eta(inp, hidden)
         output = output.squeeze()
+        # then we grab the times x hidden size to put into the LSTM
 
+        # so the output is the eta that we care about! Okay that makes sense, it's the
+        # hidden dimension
+
+        # ! Question: Why did they decide for eta's size to be num_topics?
+        # ** Answer because the etas themselves provide a prior for the thetas themselves! **
+
+        # so these etas represent a per time distribution -- why make it the number of topics?
         etas = torch.zeros(self.num_times, self.num_topics).to(device)
         kl_eta = []
 
+        # so this is the input usually to generate the theta right?
         inp_0 = torch.cat([output[0], torch.zeros(self.num_topics,).to(device)], dim=0)
         mu_0 = self.mu_q_eta(inp_0)
         logsigma_0 = self.logsigma_q_eta(inp_0)
         etas[0] = self.reparameterize(mu_0, logsigma_0)
 
+        # so we take the previous time step's produced eta as the prior to generate
+        # the next steps, using delta as well as the variance, same as the alpha
         p_mu_0 = torch.zeros(self.num_topics,).to(device)
         logsigma_p_0 = torch.zeros(self.num_topics,).to(device)
         kl_0 = self.get_kl(mu_0, logsigma_0, p_mu_0, logsigma_p_0)
@@ -159,6 +189,7 @@ class DETM(nn.Module):
         """Returns the topic proportions.
         """
         eta_td = eta[times.type('torch.LongTensor')]
+        # the input is the bag of words concatenated with the 
         inp = torch.cat([bows, eta_td], dim=1)
         q_theta = self.q_theta(inp)
         if self.enc_drop > 0:
@@ -166,6 +197,8 @@ class DETM(nn.Module):
         mu_theta = self.mu_q_theta(q_theta)
         logsigma_theta = self.logsigma_q_theta(q_theta)
         z = self.reparameterize(mu_theta, logsigma_theta)
+        # produce the log-normal (or just probability distribution of a normal distribution)
+        # for theta representing the topic distribution, and get the KL from the prior eta and the theta
         theta = F.softmax(z, dim=-1)
         kl_theta = self.get_kl(mu_theta, logsigma_theta, eta_td, torch.zeros(self.num_topics).to(device))
         return theta, kl_theta
@@ -184,9 +217,12 @@ class DETM(nn.Module):
 
     def get_nll(self, theta, beta, bows):
         theta = theta.unsqueeze(1)
+        # matrix multiplication
         loglik = torch.bmm(theta, beta).squeeze(1)
         loglik = loglik
+        # get the log likelihood and then
         loglik = torch.log(loglik+1e-6)
+        # the nll gives the cross entropy loss
         nll = -loglik * bows
         nll = nll.sum(-1)
         return nll  
@@ -194,15 +230,26 @@ class DETM(nn.Module):
     def forward(self, bows, normalized_bows, times, rnn_inp, num_docs):
         bsz = normalized_bows.size(0)
         coeff = num_docs / bsz 
+        
+        # return the sampled alphas, and the KL divergences between all of them
         alpha, kl_alpha = self.get_alpha()
+        # now get all the etas
         eta, kl_eta = self.get_eta(rnn_inp)
+        # now get the thetas based on the normalized bag of words input
+        # as well as the eta and the times we have
         theta, kl_theta = self.get_theta(eta, normalized_bows, times)
         kl_theta = kl_theta.sum() * coeff
 
         beta = self.get_beta(alpha)
         beta = beta[times.type('torch.LongTensor')]
+        # get the reconstruction loss too (cross-entropy/nll)
         nll = self.get_nll(theta, beta, bows)
         nll = nll.sum() * coeff
+
+        # so the elbo is the reconstruction loss (nll) which affects the encoder
+        # and the regularization terms modifying the other variational parameters
+        # namely the topic embedding, the topic distribution prior eta and
+        # the actual topic distribution theta
         nelbo = nll + kl_alpha + kl_eta + kl_theta
         return nelbo, nll, kl_alpha, kl_eta, kl_theta
 
