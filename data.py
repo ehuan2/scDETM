@@ -79,12 +79,20 @@ def get_data(path, temporal=False):
 
 def get_batch(tokens, counts, ind, vocab_size, emsize=300, temporal=False, times=None):
     """fetch input data by batch."""
+    # batch size is based on the batch itself
     batch_size = len(ind)
+    # 1000 samples x genes
     data_batch = np.zeros((batch_size, vocab_size))
+
+    # if it's temporal (which we care about) we'll maintain a vector of 1000 samples
     if temporal:
         times_batch = np.zeros((batch_size, ))
+
+    # then for each sample in the 1000 samples
     for i, doc_id in enumerate(ind):
+        # get the specific cell
         doc = tokens[doc_id]
+        # then get the gene count per document
         count = counts[doc_id]
         if temporal:
             timestamp = times[doc_id]
@@ -108,19 +116,44 @@ def get_batch(tokens, counts, ind, vocab_size, emsize=300, temporal=False, times
 # formats the rnn inputs -- basically returns a time x vocab list
 # of how many times a token was seen per time step
 def get_rnn_input(tokens, counts, times, num_times, vocab_size, num_docs):
+    # first, get a random permutation over all the cells
     indices = torch.randperm(num_docs)
-    indices = torch.split(indices, 1000) 
+    # then, we split this up into groups of 1000
+    indices = torch.split(indices, 1000)
+
+    # then, we create a times by genes data count
     rnn_input = torch.zeros(num_times, vocab_size).to(device)
+
     # cnt provides a count for how many documents per time step we encounter
     cnt = torch.zeros(num_times, ).to(device)
+
+    # iterate over all the random permutations of cells
     for idx, ind in enumerate(indices):
+        # we grab the batch:
+            # data_batch represents
+            # times_batch represents
         data_batch, times_batch = get_batch(tokens, counts, ind, vocab_size, temporal=True, times=times)
+
+        # then for each time step
         for t in range(num_times):
+            # we check if the times match up
+            # tmp is the list of indices that are non-zero
             tmp = (times_batch == t).nonzero()
+            # then for each of these indices, we add up the count I think
+
+            # ! Note: there is a slight bug in the code here when we don't have
+            # ! more than 1 sample per time step
             docs = data_batch[tmp].squeeze().sum(0)
+            # then, we add this to the time step's gene count I think...
             rnn_input[t] += docs
+            # add to the total count for that time step
             cnt[t] += len(tmp)
+
         if idx % 20 == 0:
             print('idx: {}/{}'.format(idx, len(indices)))
+    
+    # then normalize it by the total counts for each time step
     rnn_input = rnn_input / cnt.unsqueeze(1)
+
+    # return the times by genes matrix that we have.
     return rnn_input
