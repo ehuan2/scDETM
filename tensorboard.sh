@@ -1,0 +1,1 @@
+tensorboard --logdir=logs/scDETM_runs
