@@ -5,20 +5,6 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 import argparse
 
-argparser = argparse.ArgumentParser()
-argparser.add_argument('--data_path', type=str, default='../data/Processed_data_RNA-gaba_full-counts-and-downsampled-CPM.h5ad')
-args = argparser.parse_args()
-
-scrna_seq = sc.read_h5ad(args.data_path)
-
-def get_query_copy(query):
-    return scrna_seq[scrna_seq.obs.query(query).index].copy()
-
-# Example on getting male only data:
-# scrna_seq_male = get_query_copy("Sex == 'M'")
-
-train_times = scrna_seq.obs['numerical_age'].unique()
-
 # make a pseudo-bulk data for this
 # to do this, we need to first split into the different cell types
 # for each different time point
@@ -46,16 +32,11 @@ def get_bulk_data(data):
     
     return bulk_data, times_sorted, idx_and_cell_types
 
-def normalize_data(bulk_data):
+def normalize_data(bulk_data, idx_and_cell_types):
     normalized_bulk_data = torch.zeros_like(bulk_data)
     for idx, _ in idx_and_cell_types:
         normalized_bulk_data[idx] = bulk_data[idx] / bulk_data[idx].sum(1, keepdim=True)
     return normalized_bulk_data
-
-
-bulk_data, times_sorted, idx_and_cell_types = get_bulk_data(scrna_seq)
-normalized_bulk_data = normalize_data(bulk_data)
-
 
 def heatmap(data, cell_idx, celltype, gene_labels, n=10):
     plt.figure(figsize=(10, 10))
@@ -81,7 +62,18 @@ def heatmap(data, cell_idx, celltype, gene_labels, n=10):
     plt.savefig(f'./figures/heatmap_{celltype}.png')
     print(f'Saved figure for heatmap_{celltype}.png')
 
-gene_labels = scrna_seq.var['non-unique_names'].tolist()
 
-for idx, cell_type in idx_and_cell_types:
-    heatmap(normalized_bulk_data, idx, cell_type, gene_labels)
+if __name__ == '__main__':
+    argparser = argparse.ArgumentParser()
+    argparser.add_argument('--data_path', type=str, default='../data/Processed_data_RNA-gaba_full-counts-and-downsampled-CPM.h5ad')
+    args = argparser.parse_args()
+
+    scrna_seq = sc.read_h5ad(args.data_path)
+
+    bulk_data, times_sorted, idx_and_cell_types = get_bulk_data(scrna_seq)
+    normalized_bulk_data = normalize_data(bulk_data, idx_and_cell_types)
+
+    gene_labels = scrna_seq.var['non-unique_names'].tolist()
+
+    for idx, cell_type in idx_and_cell_types:
+        heatmap(normalized_bulk_data, idx, cell_type, gene_labels)
