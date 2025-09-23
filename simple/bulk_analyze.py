@@ -3,10 +3,13 @@ import torch
 import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
+import argparse
 
-scrna_seq = sc.read_h5ad(
-    f'../data/Processed_data_RNA-gaba_full-counts-and-downsampled-CPM.h5ad'
-)
+argparser = argparse.ArgumentParser()
+argparser.add_argument('--data_path', type=str, default='../data/Processed_data_RNA-gaba_full-counts-and-downsampled-CPM.h5ad')
+args = argparser.parse_args()
+
+scrna_seq = sc.read_h5ad(args.data_path)
 
 def get_query_copy(query):
     return scrna_seq[scrna_seq.obs.query(query).index].copy()
@@ -43,26 +46,31 @@ def get_bulk_data(data):
     
     return bulk_data, times_sorted, idx_and_cell_types
 
-bulk_data, times_sorted, idx_and_cell_types = get_bulk_data(scrna_seq)
-normalized_bulk_data = torch.zeros_like(bulk_data)
-for idx, _ in idx_and_cell_types:
-    normalized_bulk_data[idx] = bulk_data[idx] / bulk_data[idx].sum(1, keepdim=True)
-print(normalized_bulk_data.shape)
+def normalize_data(bulk_data):
+    normalized_bulk_data = torch.zeros_like(bulk_data)
+    for idx, _ in idx_and_cell_types:
+        normalized_bulk_data[idx] = bulk_data[idx] / bulk_data[idx].sum(1, keepdim=True)
+    return normalized_bulk_data
 
-def heatmap(data, cell_idx, celltype):
-    plt.figure(figsize=(10, 8))
-    non_zero = data[cell_idx][:, data[cell_idx].sum(0) > 0.02]
+
+bulk_data, times_sorted, idx_and_cell_types = get_bulk_data(scrna_seq)
+normalized_bulk_data = normalize_data(bulk_data)
+
+
+def heatmap(data, cell_idx, celltype, gene_labels, n=10):
+    plt.figure(figsize=(10, 10))
+    top_n_columns = np.argsort(data[cell_idx].sum(0))[-n:]
+    non_zero = data[cell_idx][:, top_n_columns]
+
     sns.heatmap(non_zero.numpy(), cmap='viridis')
     plt.title(f'Gene expression proportion for cell type over time: {celltype}')
     plt.xlabel('Genes')
-    plt.ylabel('Time Points')
-
-    x_labels = np.arange(data[cell_idx].shape[1])[np.where(data[cell_idx].sum(0) > 0.02)[0]]
+    plt.ylabel('Ages')
 
     # add time labels
     plt.xticks(
-        ticks=np.arange(len(x_labels))+0.5,
-        labels=x_labels,
+        ticks=np.arange(len(top_n_columns))+0.5,
+        labels=[gene_labels[col] for col in top_n_columns.tolist()],
         rotation=90,
     )
     plt.yticks(
@@ -73,5 +81,7 @@ def heatmap(data, cell_idx, celltype):
     plt.savefig(f'./figures/heatmap_{celltype}.png')
     print(f'Saved figure for heatmap_{celltype}.png')
 
+gene_labels = scrna_seq.var['non-unique_names'].tolist()
+
 for idx, cell_type in idx_and_cell_types:
-    heatmap(normalized_bulk_data, idx, cell_type)
+    heatmap(normalized_bulk_data, idx, cell_type, gene_labels)
