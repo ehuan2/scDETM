@@ -12,7 +12,7 @@ argparser.add_argument('--cell_type_res', type=str, default='sub_clust')
 args = argparser.parse_args()
 
 scrna_seq = sc.read_h5ad(args.data_path)
-bulk_data, times_sorted, idx_and_cell_types = get_bulk_data(scrna_seq)
+bulk_data, times_sorted, idx_and_cell_types = get_bulk_data(scrna_seq, cell_type_res=args.cell_type_res)
 normalized_bulk_data = normalize_data(bulk_data, idx_and_cell_types)
 
 def flatten(idx_and_cell_types, bulk_data, times_sorted):
@@ -32,7 +32,7 @@ def flatten(idx_and_cell_types, bulk_data, times_sorted):
     flattened_genes = torch.nan_to_num(flattened_genes, nan=0.0)
 
     adata = sc.AnnData(flattened_genes.numpy())
-    adata.obs['sub_clust'] = cell_type_obs
+    adata.obs[args.cell_type_res] = cell_type_obs
     adata.obs['numerical_age'] = times_obs
     return adata
 
@@ -74,7 +74,7 @@ flattened_data = flatten(idx_and_cell_types, normalized_bulk_data, times_sorted)
 
 # visualizes the bulk data by cell type
 # visualize(flattened_data, 'tsne', 'sub_clust', is_bulk=True)
-visualize(flattened_data, 'umap', 'sub_clust', is_bulk=True)
+visualize(flattened_data, 'umap', args.cell_type_res, is_bulk=True)
 
 # # visualizes the bulk data by time
 # visualize(flattened_data, 'tsne', 'numerical_age', is_bulk=True)
@@ -82,7 +82,7 @@ visualize(flattened_data, 'umap', 'numerical_age', is_bulk=True)
 
 # # now, let's visualize the single cell data by cell type
 # visualize(scrna_seq, 'tsne', 'sub_clust', is_bulk=False)
-visualize(scrna_seq, 'umap', 'sub_clust', is_bulk=False)
+visualize(scrna_seq, 'umap', args.cell_type_res, is_bulk=False)
 # visualizes the single cell data by time
 # visualize(scrna_seq, 'tsne', 'numerical_age', is_bulk=False)
 visualize(scrna_seq, 'umap', 'numerical_age', is_bulk=False)
