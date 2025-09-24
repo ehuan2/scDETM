@@ -8,6 +8,7 @@ from bulk_analyze import get_bulk_data, normalize_data
 
 argparser = argparse.ArgumentParser()
 argparser.add_argument('--data_path', type=str, default='../data/Processed_data_RNA-gaba_full-counts-and-downsampled-CPM.h5ad')
+argparser.add_argument('--cell_type_res', type=str, default='sub_clust')
 args = argparser.parse_args()
 
 scrna_seq = sc.read_h5ad(args.data_path)
@@ -21,6 +22,8 @@ def flatten(idx_and_cell_types, bulk_data, times_sorted):
     cell_types = [cell_type for _, cell_type in idx_and_cell_types]
     cell_type_obs = np.repeat(cell_types, len(times_sorted))
 
+    times_obs = times_sorted * len(cell_types)
+
     # now let's flatten K x T x G to get (K x T) x G instead
     flattened_genes = torch.flatten(bulk_data, 0, 1)
     print(f'Post flattened shape: {flattened_genes.shape}')
@@ -29,26 +32,57 @@ def flatten(idx_and_cell_types, bulk_data, times_sorted):
     flattened_genes = torch.nan_to_num(flattened_genes, nan=0.0)
 
     adata = sc.AnnData(flattened_genes.numpy())
-    adata.obs["cell_type"] = cell_type_obs
+    adata.obs['sub_clust'] = cell_type_obs
+    adata.obs['numerical_age'] = times_obs
     return adata
 
-def visualize(flattened_genes, method='umap'):
+def visualize(flattened_genes, method='umap', color='cell_type', is_bulk=False):
     # for either of them, we need to use PCA to reduce the dimensionality
-    plt.figure(figsize=(15, 10))
-    plt.tight_layout()
+    plt.figure(figsize=(20, 15))
     sc.tl.pca(flattened_genes, svd_solver='arpack')
+    
+    is_gaba = "gaba" in args.data_path
     
     if method == 'umap':
         sc.pp.neighbors(flattened_genes, n_neighbors=10, n_pcs=40)
         sc.tl.umap(flattened_genes)
-        sc.pl.umap(flattened_genes, title='U-Map of Herring Dataset', color='cell_type', legend_loc='upper right')
-        plt.savefig(f'figures/umap_{"gaba" if "gaba" in args.data_path else "all"}.png')
+        sc.pl.umap(
+            flattened_genes,
+            title=f'U-Map of Herring Dataset ({"GABA-" if is_gaba else "All" }, {"Bulk" if is_bulk else "Single-Cell"})',
+            color=color,
+            legend_loc='right margin',
+            legend_fontsize=6,
+            legend_fontoutline=1
+        )
+        plt.tight_layout()        
+        plt.savefig(f'figures/{"gaba" if is_gaba else "all"}/{"bulk" if is_bulk else "single_cell"}/umap_{args.cell_type_res}_ann_{color}.png')
+
     elif method == 'tsne':
         sc.tl.tsne(flattened_genes)
-        sc.pl.tsne(flattened_genes, title='t-SNE of Herring Dataset', color='cell_type', legend_loc='upper right')
-        plt.savefig(f'figures/tsne_{"gaba" if "gaba" in args.data_path else "all"}.png')
+        sc.pl.tsne(
+            flattened_genes,
+            title=f't-SNE of Herring Dataset ({"GABA-" if is_gaba else "All" }, {"Bulk" if is_bulk else "Single-Cell"})',
+            color=color,
+            legend_loc='right margin',
+            legend_fontsize=6,
+            legend_fontoutline=1
+        )
+        plt.tight_layout()
+        plt.savefig(f'figures/{"gaba" if is_gaba else "all"}/{"bulk" if is_bulk else "single_cell"}/tsne_{args.cell_type_res}_ann_{color}.png')
 
 flattened_data = flatten(idx_and_cell_types, normalized_bulk_data, times_sorted)
 
-visualize(flattened_data, 'tsne')
-visualize(flattened_data, 'umap')
+# visualizes the bulk data by cell type
+# visualize(flattened_data, 'tsne', 'sub_clust', is_bulk=True)
+visualize(flattened_data, 'umap', 'sub_clust', is_bulk=True)
+
+# # visualizes the bulk data by time
+# visualize(flattened_data, 'tsne', 'numerical_age', is_bulk=True)
+visualize(flattened_data, 'umap', 'numerical_age', is_bulk=True)
+
+# # now, let's visualize the single cell data by cell type
+# visualize(scrna_seq, 'tsne', 'sub_clust', is_bulk=False)
+visualize(scrna_seq, 'umap', 'sub_clust', is_bulk=False)
+# visualizes the single cell data by time
+# visualize(scrna_seq, 'tsne', 'numerical_age', is_bulk=False)
+visualize(scrna_seq, 'umap', 'numerical_age', is_bulk=False)

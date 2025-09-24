@@ -9,12 +9,12 @@ import argparse
 # to do this, we need to first split into the different cell types
 # for each different time point
 # then for each cell type at a certain time point, we sum up the counts
-def get_bulk_data(data):
+def get_bulk_data(data, cell_type_res='sub_clust'):
     """
     Given some annotated data, return the bulk data for each cell type
     at each time point.
     """
-    idx_and_cell_types = list(enumerate(data.obs['cell_type'].unique().tolist()))
+    idx_and_cell_types = list(enumerate(data.obs[cell_type_res].unique().tolist()))
     times_sorted = sorted(data.obs['numerical_age'].unique().tolist())
     num_genes = data.X.shape[1] # X is cells by genes
     
@@ -27,7 +27,7 @@ def get_bulk_data(data):
         # and add up the counts
         for idx, cell_type in idx_and_cell_types:
             bulk_data[idx][t_idx] = torch.tensor(
-                data_at_t[data_at_t.obs['cell_type'] == cell_type].X.toarray()
+                data_at_t[data_at_t.obs[cell_type_res] == cell_type].X.toarray()
             ).sum(0)
     
     return bulk_data, times_sorted, idx_and_cell_types
