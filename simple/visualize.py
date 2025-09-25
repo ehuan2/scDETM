@@ -12,7 +12,7 @@ argparser.add_argument('--data_path', type=str, default='../data/Processed_data_
 argparser.add_argument('--cell_type_res', type=str, default='sub_clust')
 args = argparser.parse_args()
 
-def flatten(idx_and_cell_types, bulk_data, times_sorted):
+def flatten(idx_and_cell_types, bulk_data, times_sorted, stages):
     """Given the scrna seq data and the bulk data, return the annotated flattened version"""
     print(f'Pre-flattened shape: {bulk_data.shape}')
 
@@ -20,6 +20,7 @@ def flatten(idx_and_cell_types, bulk_data, times_sorted):
     cell_type_obs = np.repeat(cell_types, len(times_sorted))
 
     times_obs = times_sorted * len(cell_types)
+    stages_obs = stages * len(cell_types)
 
     # now let's flatten K x T x G to get (K x T) x G instead
     flattened_genes = torch.flatten(bulk_data, 0, 1)
@@ -31,6 +32,7 @@ def flatten(idx_and_cell_types, bulk_data, times_sorted):
     adata = sc.AnnData(flattened_genes.numpy())
     adata.obs[args.cell_type_res] = cell_type_obs
     adata.obs['numerical_age'] = times_obs
+    adata.obs['stage_id'] = stages_obs
     return adata
 
 def visualize(flattened_genes, method='umap', color='cell_type', is_bulk=False, save_to_folder='figures/'):
@@ -69,7 +71,7 @@ def visualize(flattened_genes, method='umap', color='cell_type', is_bulk=False, 
         plt.tight_layout()
         plt.savefig(f'{folder}/tsne_{args.cell_type_res}_ann_{color}.png')
 
-def visualize_cell_type_partitions(scrna_seq, idx_and_cell_types):
+def visualize_cell_type_partitions(scrna_seq, idx_and_cell_types, color='numerical_age'):
     print(f'There are {len(idx_and_cell_types)} types of {args.cell_type_res}.')
     is_gaba = "gaba" in args.data_path
 
@@ -77,22 +79,30 @@ def visualize_cell_type_partitions(scrna_seq, idx_and_cell_types):
         visualize(
             scrna_seq[scrna_seq.obs[args.cell_type_res] == cell_type],
             method='umap',
-            color='numerical_age',
+            color=color,
             is_bulk=False,
             save_to_folder=f'figures/cell_types/{"gaba" if is_gaba else "all"}/{args.cell_type_res}/{cell_type}'
         )
         print(f'Finished for cell type {cell_type}...')
 
+def map_times_to_stage(scrna_seq, times_sorted):
+    stages = []
+    for time in times_sorted:
+        stages.append(scrna_seq[scrna_seq.obs['numerical_age'] == time].obs['stage_id'].unique().tolist())
+        # make sure that it's unique
+        assert len(stages[-1]) == 1
+        stages[-1] = stages[-1][0]
+    print(stages)
+    return stages
+
 scrna_seq = sc.read_h5ad(args.data_path)
 bulk_data, times_sorted, idx_and_cell_types = get_bulk_data(scrna_seq, cell_type_res=args.cell_type_res)
 normalized_bulk_data = normalize_data(bulk_data, idx_and_cell_types)
 
-flattened_data = flatten(idx_and_cell_types, normalized_bulk_data, times_sorted)
+stages = map_times_to_stage(scrna_seq, times_sorted)
+flattened_data = flatten(idx_and_cell_types, normalized_bulk_data, times_sorted, stages)
 
-visualize_cell_type_partitions(scrna_seq, idx_and_cell_types)
-
-# visualize the single-cell data for each type by time
-# visualize()
+visualize_cell_type_partitions(scrna_seq, idx_and_cell_types, color='stage_id')
 
 # visualizes the bulk data by cell type
 # visualize(flattened_data, 'tsne', 'sub_clust', is_bulk=True)
@@ -100,11 +110,11 @@ visualize_cell_type_partitions(scrna_seq, idx_and_cell_types)
 
 # # visualizes the bulk data by time
 # visualize(flattened_data, 'tsne', 'numerical_age', is_bulk=True)
-# visualize(flattened_data, 'umap', 'numerical_age', is_bulk=True)
+visualize(flattened_data, 'umap', 'stage_id', is_bulk=True)
 
 # # now, let's visualize the single cell data by cell type
 # visualize(scrna_seq, 'tsne', 'sub_clust', is_bulk=False)
 # visualize(scrna_seq, 'umap', args.cell_type_res, is_bulk=False)
 # visualizes the single cell data by time
 # visualize(scrna_seq, 'tsne', 'numerical_age', is_bulk=False)
-# visualize(scrna_seq, 'umap', 'numerical_age', is_bulk=False)
+visualize(scrna_seq, 'umap', 'stage_id', is_bulk=False)
